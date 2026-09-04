@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pulse — marchés crypto en direct</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg: #0B0F14;
+    --bg-grid: #0E141B;
+    --panel: #121922;
+    --panel-border: #1E2932;
+    --text: #E7EDF2;
+    --text-dim: #7C8B98;
+    --text-faint: #4B5761;
+    --signal: #4FE7C1;
+    --signal-dim: rgba(79,231,193,0.14);
+    --warn: #F5A85E;
+    --crit: #F0665E;
+    --info: #6FA8DC;
+    --font-head: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ background: var(--bg); color: var(--text); font-family: var(--font-head); min-height:100vh; }
+  body{
+    background-image:
+      linear-gradient(var(--bg-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+    background-size: 34px 34px;
+    padding: 28px clamp(16px,4vw,40px) 40px;
+  }
+
+  header{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    flex-wrap:wrap; gap:16px;
+    padding-bottom:22px; border-bottom:1px solid var(--panel-border); margin-bottom:24px;
+  }
+  .brand h1{ font-size:26px; font-weight:700; letter-spacing:-0.02em; }
+  .brand p{ color:var(--text-dim); font-size:14px; margin-top:4px; }
+
+  .status-cluster{ display:flex; align-items:center; gap:22px; }
+  .live-pill{
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--font-mono); font-size:12px; color:var(--signal);
+    border:1px solid rgba(79,231,193,0.35); background:var(--signal-dim);
+    padding:6px 12px; border-radius:999px; transition: all .3s;
+  }
+  .live-pill.offline{ color:var(--crit); border-color:rgba(240,102,94,0.35); background:rgba(240,102,94,0.1); }
+  .live-dot{ width:7px; height:7px; border-radius:50%; background:currentColor;
+    box-shadow:0 0 0 0 rgba(79,231,193,0.6); animation:pulse 1.8s infinite; }
+  @keyframes pulse{
+    0%{ box-shadow:0 0 0 0 currentColor; opacity:1; }
+    70%{ box-shadow:0 0 0 7px transparent; opacity:.7; }
+    100%{ box-shadow:0 0 0 0 transparent; opacity:1; }
+  }
+  .clock{ font-family:var(--font-mono); font-size:14px; color:var(--text-dim); }
+
+  .grid{ display:grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap:16px; }
+  .kpi-row{ margin-bottom:16px; }
+
+  .panel{ background:var(--panel); border:1px solid var(--panel-border); border-radius:10px; padding:18px 20px; }
+  .panel-title{ font-size:13px; font-weight:500; color:var(--text-dim); margin-bottom:2px; }
+  .panel-sub{ font-size:11px; color:var(--text-faint); font-family:var(--font-mono); }
+
+  .kpi-card{ display:flex; flex-direction:column; gap:10px; }
+  .kpi-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .coin-name{ display:flex; align-items:center; gap:8px; }
+  .coin-symbol{ font-size:13px; font-weight:600; color:var(--text); }
+  .coin-full{ font-size:11px; color:var(--text-faint); }
+  .kpi-value{ font-family:var(--font-mono); font-size:22px; font-weight:600; letter-spacing:-0.01em; }
+  .kpi-delta{ font-family:var(--font-mono); font-size:12px; padding:3px 7px; border-radius:6px; white-space:nowrap; }
+  .delta-up{ color:#3FE1A8; background:rgba(63,225,168,0.12); }
+  .delta-down{ color:#F0665E; background:rgba(240,102,94,0.12); }
+  .kpi-spark{ height:34px; width:100%; }
+  .kpi-spark path.area{ opacity:0.12; }
+  .kpi-spark path.line{ fill:none; stroke-width:1.6px; }
+
+  .content-row{ display:grid; grid-template-columns: 2fr 1fr; gap:16px; margin-bottom:16px; align-items:stretch; }
+  .side-col{ display:flex; flex-direction:column; gap:16px; }
+
+  .chart-panel .panel-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px; flex-wrap:wrap; gap:8px; }
+  .legend-dot{ display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:6px; background:var(--signal); }
+  #mainChart{ width:100%; height:260px; }
+  .axis path, .axis line{ stroke:var(--panel-border); }
+  .axis text{ fill:var(--text-faint); font-family:var(--font-mono); font-size:10px; }
+  .gridline line{ stroke:var(--panel-border); stroke-dasharray:2,4; }
+  .gridline path{ display:none; }
+
+  .gauge-panel{ display:flex; flex-direction:column; align-items:center; text-align:center; }
+  #healthGauge{ width:160px; height:100px; margin-top:6px; }
+  .gauge-score{ font-family:var(--font-mono); font-size:30px; font-weight:700; margin-top:-38px; }
+  .gauge-label{ font-size:12px; color:var(--text-dim); margin-top:4px; }
+  .gauge-source{ font-size:10px; color:var(--text-faint); font-family:var(--font-mono); margin-top:8px; }
+
+  #regionChart{ width:100%; }
+  .region-label{ font-family:var(--font-mono); font-size:11px; fill:var(--text-dim); }
+  .region-value{ font-family:var(--font-mono); font-size:11px; fill:var(--text); }
+
+  .stream-panel{ padding-top:16px; }
+  .stream-list{ list-style:none; max-height:230px; overflow-y:auto; display:flex; flex-direction:column; }
+  .stream-list::-webkit-scrollbar{ width:6px; }
+  .stream-list::-webkit-scrollbar-thumb{ background:var(--panel-border); border-radius:4px; }
+  .stream-item{
+    display:grid; grid-template-columns: 78px 12px 1fr 90px; align-items:center; gap:12px;
+    padding:9px 4px; border-bottom:1px solid var(--panel-border); font-size:13px; animation:enter .4s ease;
+  }
+  .stream-item:last-child{ border-bottom:none; }
+  @keyframes enter{ from{ opacity:0; transform:translateY(-4px);} to{ opacity:1; transform:translateY(0);} }
+  .stream-time{ font-family:var(--font-mono); color:var(--text-faint); font-size:11px; }
+  .stream-sev{ width:8px; height:8px; border-radius:50%; }
+  .sev-info{ background:var(--info); }
+  .sev-warning{ background:var(--warn); }
+  .sev-critical{ background:var(--crit); }
+  .stream-msg{ color:var(--text); }
+  .stream-tag{ font-family:var(--font-mono); font-size:10px; text-align:right; color:var(--text-faint); }
+
+  .empty-state{ color:var(--text-faint); font-size:13px; font-family:var(--font-mono); padding:20px 0; text-align:center; }
+
+  footer{ margin-top:26px; text-align:center; color:var(--text-faint); font-size:11px; font-family:var(--font-mono); }
+  footer a{ color:var(--text-dim); }
+
+  @media (max-width:900px){
+    .content-row{ grid-template-columns:1fr; }
+    .stream-item{ grid-template-columns:60px 10px 1fr; }
+    .stream-tag{ display:none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>Pulse</h1>
+    <p>Marchés crypto en direct — données réelles via CoinGecko</p>
+  </div>
+  <div class="status-cluster">
+    <div class="live-pill" id="livePill"><span class="live-dot"></span><span id="liveText">Connexion…</span></div>
+    <div class="clock" id="clock">--:--:--</div>
+  </div>
+</header>
+
+<section class="grid kpi-row" id="coinGrid">
+  <div class="empty-state">Chargement des prix en direct…</div>
+</section>
+
+<section class="content-row">
+  <div class="panel chart-panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title" style="font-size:14px;color:var(--text)"><span class="legend-dot"></span><span id="mainChartTitle">Bitcoin — 24 dernières heures</span></div>
+        <div class="panel-sub">prix en USD · données CoinGecko</div>
+      </div>
+    </div>
+    <svg id="mainChart"></svg>
+  </div>
+
+  <div class="side-col">
+    <div class="panel gauge-panel">
+      <div class="panel-title">Indice Fear &amp; Greed</div>
+      <svg id="healthGauge"></svg>
+      <div class="gauge-score" id="healthScore">—</div>
+      <div class="gauge-label" id="healthLabel">Chargement…</div>
+      <div class="gauge-source">source : alternative.me</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom:10px;">Part de capitalisation</div>
+      <svg id="regionChart"></svg>
+    </div>
+  </div>
+</section>
+
+<section class="panel stream-panel">
+  <div class="panel-title" style="font-size:14px;color:var(--text);margin-bottom:8px;">Mouvements de prix en direct</div>
+  <ul class="stream-list" id="streamList"></ul>
+</section>
+
+<footer>Données fournies par l'API publique CoinGecko et alternative.me · rafraîchissement automatique</footer>
+
+<script>
+/* ============================================================
+   PULSE — dashboard crypto temps réel, données réelles
+   Sources : CoinGecko (prix, market cap, historique)
+             alternative.me (indice Fear & Greed)
+   ============================================================ */
+
+const fmt1 = d3.format('.1f');
+const fmtPct = d3.format('+.2f');
+
+function fmtPrice(v){
+  if (v == null || isNaN(v)) return '—';
+  if (v >= 1000) return '$' + d3.format(',.0f')(v);
+  if (v >= 1) return '$' + d3.format(',.2f')(v);
+  if (v >= 0.01) return '$' + d3.format('.4f')(v);
+  return '$' + d3.format('.6f')(v);
+}
+
+/* ---------- horloge ---------- */
+function tickClock(){ d3.select('#clock').text(d3.timeFormat('%H:%M:%S')(new Date())); }
+tickClock();
+setInterval(tickClock, 1000);
+
+function setLive(ok){
+  d3.select('#livePill').classed('offline', !ok);
+  d3.select('#liveText').text(ok ? 'Flux en direct' : 'Connexion perdue — nouvelle tentative…');
+}
+
+/* ---------- état ---------- */
+let coins = [];          // dernière réponse /coins/markets
+let prevCoins = {};       // id -> prix précédent, pour calculer les deltas réels entre sondages
+let btcHistory = [];      // [{date, price}] dernières 24h
+let streamData = [];
+const MAX_STREAM = 10;
+const COIN_COUNT = 8;
+
+/* ============================================================
+   Récupération des données réelles
+   ============================================================ */
+async function fetchMarkets(){
+  const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${COIN_COUNT}&page=1&sparkline=true&price_change_percentage=1h,24h`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('markets fetch failed: ' + res.status);
+  const data = await res.json();
+
+  // calcule un delta réel entre ce sondage et le précédent (pas juste le 24h de l'API)
+  data.forEach(c => {
+    const prev = prevCoins[c.id];
+    c._pollDelta = prev ? ((c.current_price - prev) / prev) * 100 : 0;
+    prevCoins[c.id] = c.current_price;
+  });
+
+  coins = data;
+  return data;
+}
+
+async function fetchBtcHistory(){
+  const url = 'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('history fetch failed: ' + res.status);
+  const data = await res.json();
+  btcHistory = data.prices.map(([ts, price]) => ({ date: new Date(ts), price }));
+  return btcHistory;
+}
+
+async function fetchFearGreed(){
+  const res = await fetch('https://api.alternative.me/fng/?limit=1');
+  if (!res.ok) throw new Error('fng fetch failed: ' + res.status);
+  const data = await res.json();
+  const entry = data.data[0];
+  return { value: +entry.value, classification: entry.value_classification };
+}
+
+/* ============================================================
+   Cartes de prix (une par crypto, générées dynamiquement)
+   ============================================================ */
+function renderCoinGrid(){
+  const grid = d3.select('#coinGrid');
+  grid.selectAll('.empty-state').remove();
+
+  const cards = grid.selectAll('div.kpi-card').data(coins, d => d.id);
+
+  const enter = cards.enter().append('div').attr('class', 'panel kpi-card');
+  const top = enter.append('div').attr('class', 'kpi-top');
+  const nameBlock = top.append('div');
+  const nameRow = nameBlock.append('div').attr('class', 'coin-name');
+  nameRow.append('span').attr('class', 'coin-symbol');
+  nameBlock.append('div').attr('class', 'kpi-value');
+  top.append('div').attr('class', 'kpi-delta');
+  enter.append('svg').attr('class', 'kpi-spark');
+
+  const merged = enter.merge(cards);
+
+  merged.select('.coin-symbol').text(d => d.symbol.toUpperCase());
+  merged.select('.kpi-value').text(d => fmtPrice(d.current_price));
+
+  merged.select('.kpi-delta')
+    .text(d => fmtPct(d.price_change_percentage_24h_in_currency ?? d.price_change_percentage_24h ?? 0) + '% (24h)')
+    .attr('class', d => 'kpi-delta ' + (((d.price_change_percentage_24h_in_currency ?? d.price_change_percentage_24h ?? 0) >= 0) ? 'delta-up' : 'delta-down'));
+
+  merged.each(function(d){
+    const points = (d.sparkline_in_7d && d.sparkline_in_7d.price) ? d.sparkline_in_7d.price.slice(-60) : [d.current_price, d.current_price];
+    renderSpark(d3.select(this).select('svg.kpi-spark'), points, (d.price_change_percentage_24h_in_currency ?? 0) >= 0);
+  });
+
+  cards.exit().remove();
+}
+
+function renderSpark(svgSel, data, up){
+  const svg = svgSel;
+  const node = svg.node();
+  const w = node.clientWidth || 200;
+  const h = node.clientHeight || 34;
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+
+  const x = d3.scaleLinear().domain([0, data.length - 1]).range([0, w]);
+  const y = d3.scaleLinear().domain(d3.extent(data)).nice().range([h - 3, 3]);
+  const color = up ? '#3FE1A8' : '#F0665E';
+
+  const line = d3.line().x((d,i)=>x(i)).y(d=>y(d)).curve(d3.curveMonotoneX);
+  const area = d3.area().x((d,i)=>x(i)).y0(h).y1(d=>y(d)).curve(d3.curveMonotoneX);
+
+  let areaPath = svg.selectAll('path.area').data([data]);
+  areaPath.enter().append('path').attr('class','area')
+    .merge(areaPath).attr('fill', color).attr('d', area);
+
+  let linePath = svg.selectAll('path.line').data([data]);
+  linePath.enter().append('path').attr('class','line')
+    .merge(linePath).attr('stroke', color).attr('d', line);
+}
+
+/* ============================================================
+   Graphique principal — historique réel BTC 24h
+   ============================================================ */
+const mainMargin = {top:10, right:16, bottom:22, left:56};
+function renderMainChart(){
+  if (!btcHistory.length) return;
+  const svg = d3.select('#mainChart');
+  const node = svg.node();
+  const totalW = node.clientWidth || 600;
+  const totalH = node.clientHeight || 260;
+  const w = totalW - mainMargin.left - mainMargin.right;
+  const h = totalH - mainMargin.top - mainMargin.bottom;
+  svg.attr('viewBox', `0 0 ${totalW} ${totalH}`);
+
+  let g = svg.select('g.inner');
+  if (g.empty()){
+    g = svg.append('g').attr('class','inner').attr('transform', `translate(${mainMargin.left},${mainMargin.top})`);
+    g.append('g').attr('class','gridline');
+    g.append('path').attr('class','area-main');
+    g.append('path').attr('class','line-main');
+    g.append('g').attr('class','axis axis-x').attr('transform', `translate(0,${h})`);
+    g.append('g').attr('class','axis axis-y');
+  }
+
+  const x = d3.scaleTime().domain(d3.extent(btcHistory, d => d.date)).range([0, w]);
+  const y = d3.scaleLinear().domain(d3.extent(btcHistory, d => d.price)).nice().range([h, 0]);
+
+  g.select('.gridline').call(d3.axisLeft(y).ticks(4).tickSize(-w).tickFormat(''));
+
+  const area = d3.area().x(d=>x(d.date)).y0(h).y1(d=>y(d.price)).curve(d3.curveMonotoneX);
+  const line = d3.line().x(d=>x(d.date)).y(d=>y(d.price)).curve(d3.curveMonotoneX);
+
+  g.select('.area-main').datum(btcHistory).attr('fill','url(#areaGradient)').attr('d', area);
+  g.select('.line-main').datum(btcHistory).attr('fill','none').attr('stroke','#4FE7C1').attr('stroke-width',2).attr('d', line);
+
+  g.select('.axis-x').call(d3.axisBottom(x).ticks(6).tickFormat(d3.timeFormat('%H:%M')));
+  g.select('.axis-y').call(d3.axisLeft(y).ticks(4).tickFormat(d3.format('$,.0f')));
+
+  if (svg.select('defs').empty()){
+    const defs = svg.append('defs');
+    const grad = defs.append('linearGradient').attr('id','areaGradient').attr('x1','0').attr('y1','0').attr('x2','0').attr('y2','1');
+    grad.append('stop').attr('offset','0%').attr('stop-color','#4FE7C1').attr('stop-opacity',0.35);
+    grad.append('stop').attr('offset','100%').attr('stop-color','#4FE7C1').attr('stop-opacity',0);
+  }
+
+  const last = btcHistory[btcHistory.length - 1];
+  d3.select('#mainChartTitle').text(`Bitcoin — 24 dernières heures (${fmtPrice(last.price)})`);
+}
+
+/* ============================================================
+   Jauge Fear & Greed (donnée réelle)
+   ============================================================ */
+function renderGauge(fng){
+  if (!fng) return;
+  const score = fng.value;
+  const svg = d3.select('#healthGauge');
+  const node = svg.node();
+  const w = node.clientWidth || 160;
+  const h = node.clientHeight || 100;
+  const r = Math.min(w/2, h);
+  svg.attr('viewBox', `0 0 ${w} ${h}`);
+
+  let g = svg.select('g.gauge-g');
+  if (g.empty()){
+    g = svg.append('g').attr('class','gauge-g').attr('transform', `translate(${w/2},${h})`);
+    g.append('path').attr('class','track');
+    g.append('path').attr('class','value-arc');
+  }
+
+  const arcTrack = d3.arc().innerRadius(r-14).outerRadius(r).startAngle(-Math.PI/2).endAngle(Math.PI/2);
+  const scale = d3.scaleLinear().domain([0,100]).range([-Math.PI/2, Math.PI/2]);
+
+  g.select('.track').attr('d', arcTrack).attr('fill', '#1E2932');
+
+  const color = score >= 55 ? '#3FE1A8' : score >= 45 ? '#F5A85E' : '#F0665E';
+  g.select('.value-arc')
+    .attr('fill', color)
+    .transition().duration(600)
+    .attrTween('d', function(){
+      const interp = d3.interpolate(this._prevAngle || -Math.PI/2, scale(score));
+      this._prevAngle = scale(score);
+      return t => {
+        const a = interp(t);
+        return d3.arc().innerRadius(r-14).outerRadius(r).startAngle(-Math.PI/2).endAngle(a)();
+      };
+    });
+
+  d3.select('#healthScore').text(score);
+  d3.select('#healthLabel').text(fng.classification);
+}
+
+/* ============================================================
+   Part de capitalisation (données réelles)
+   ============================================================ */
+const regionMargin = {top:4, right:44, bottom:4, left:70};
+function renderMarketCapShare(){
+  if (!coins.length) return;
+  const total = d3.sum(coins, c => c.market_cap);
+  const rows = coins.map(c => ({ name: c.symbol.toUpperCase(), pct: (c.market_cap / total) * 100 }))
+    .sort((a,b) => b.pct - a.pct);
+
+  const svg = d3.select('#regionChart');
+  const node = svg.node();
+  const totalW = node.clientWidth || 300;
+  const rowH = 26;
+  const totalH = rows.length * rowH;
+  svg.attr('viewBox', `0 0 ${totalW} ${totalH}`);
+
+  const w = totalW - regionMargin.left - regionMargin.right;
+  const x = d3.scaleLinear().domain([0, d3.max(rows, r => r.pct)]).range([0, w]);
+  const y = d3.scaleBand().domain(rows.map(r => r.name)).range([0, totalH]).padding(0.35);
+
+  let g = svg.select('g.regions-g');
+  if (g.empty()){
+    g = svg.append('g').attr('class','regions-g').attr('transform', `translate(${regionMargin.left},${regionMargin.top})`);
+  }
+
+  const sel = g.selectAll('g.row').data(rows, d => d.name);
+  const enter = sel.enter().append('g').attr('class','row');
+  enter.append('text').attr('class','region-label').attr('x',-10).attr('text-anchor','end');
+  enter.append('rect').attr('class','region-bar').attr('x',0).attr('rx',3);
+  enter.append('text').attr('class','region-value');
+
+  const merged = enter.merge(sel);
+  merged.transition().duration(500).attr('transform', d => `translate(0,${y(d.name)})`);
+  merged.select('.region-label').attr('y', y.bandwidth()/2 + 4).text(d => d.name);
+  merged.select('.region-bar')
+    .attr('height', y.bandwidth()).attr('fill','#4FE7C1').attr('opacity',0.85)
+    .transition().duration(500).attr('width', d => x(d.pct));
+  merged.select('.region-value')
+    .attr('y', y.bandwidth()/2 + 4).attr('x', d => x(d.pct) + 8).text(d => fmt1(d.pct) + '%');
+
+  sel.exit().remove();
+}
+
+/* ============================================================
+   Flux d'événements — dérivé des vraies variations de prix
+   ============================================================ */
+function pushMoverEvents(){
+  coins.forEach(c => {
+    const delta = c._pollDelta;
+    if (Math.abs(delta) < 0.15) return; // ignore le bruit
+    const sev = Math.abs(delta) > 1.5 ? 'critical' : Math.abs(delta) > 0.6 ? 'warning' : 'info';
+    streamData.unshift({
+      time: d3.timeFormat('%H:%M:%S')(new Date()),
+      sev,
+      tag: c.symbol.toUpperCase(),
+      msg: `${c.name} ${delta >= 0 ? 'en hausse' : 'en baisse'} de ${fmt1(Math.abs(delta))}% depuis le dernier relevé (${fmtPrice(c.current_price)})`
+    });
+  });
+  if (streamData.length > MAX_STREAM) streamData = streamData.slice(0, MAX_STREAM);
+}
+
+function renderStream(){
+  d3.select('#streamList').select('.empty-state').remove();
+  if (!streamData.length){
+    d3.select('#streamList').append('li').attr('class','empty-state').text('En attente de mouvements significatifs…');
+    return;
+  }
+  const items = d3.select('#streamList').selectAll('li.stream-item').data(streamData, d => d.time + d.tag + d.msg);
+  items.exit().remove();
+  const enter = items.enter().append('li').attr('class','stream-item');
+  enter.append('span').attr('class','stream-time');
+  enter.append('span').attr('class', d => 'stream-sev sev-' + d.sev);
+  enter.append('span').attr('class','stream-msg');
+  enter.append('span').attr('class','stream-tag');
+  const merged = enter.merge(items);
+  merged.select('.stream-time').text(d => d.time);
+  merged.select('.stream-sev').attr('class', d => 'stream-sev sev-' + d.sev);
+  merged.select('.stream-msg').text(d => d.msg);
+  merged.select('.stream-tag').text(d => d.tag);
+  d3.select('#streamList').selectAll('li.stream-item').data(streamData, d => d.time + d.tag + d.msg).order();
+}
+
+/* ============================================================
+   Boucle principale — sondage des vraies API
+   ============================================================ */
+let firstLoad = true;
+
+async function refreshMarkets(){
+  try{
+    await fetchMarkets();
+    renderCoinGrid();
+    renderMarketCapShare();
+    if (!firstLoad) pushMoverEvents();
+    renderStream();
+    setLive(true);
+  }catch(e){
+    console.error(e);
+    setLive(false);
+  }
+}
+
+async function refreshHistory(){
+  try{
+    await fetchBtcHistory();
+    renderMainChart();
+    setLive(true);
+  }catch(e){
+    console.error(e);
+    setLive(false);
+  }
+}
+
+async function refreshFng(){
+  try{
+    const fng = await fetchFearGreed();
+    renderGauge(fng);
+  }catch(e){
+    console.error(e);
+  }
+}
+
+async function bootstrap(){
+  await Promise.all([refreshMarkets(), refreshHistory(), refreshFng()]);
+  firstLoad = false;
+}
+
+bootstrap();
+
+setInterval(refreshMarkets, 45000);   // prix & market cap toutes les 45s
+setInterval(refreshHistory, 90000);   // historique BTC toutes les 90s
+setInterval(refreshFng, 5 * 60000);   // Fear & Greed toutes les 5 min
+
+window.addEventListener('resize', () => {
+  renderMainChart();
+  renderMarketCapShare();
+  coins.forEach(() => {}); // no-op, cards re-render on next poll
+});
+</script>
+
+</body>
+</html>
